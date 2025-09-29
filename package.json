@@ -1,0 +1,13 @@
+{
+"name": "vercel-smiles",
+"version": "1.0.0",
+"private": true,
+"type": "module",
+"dependencies": {},
+"devDependencies": {
+    "@types/node": "^22.0.0"
+},
+"engines": {
+    "node": ">=18"
+}
+}
