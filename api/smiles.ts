@@ -13,6 +13,7 @@ function decodificarTokens(tokens: string[]): string {
 const mol: string[] = [];
 for (const tok of tokens) {
     if (SPECIAL_TOKENS.has(tok)) continue;
+    
 
     if (tok.startsWith("[") && tok.endsWith("]")) {
     const contenido = tok.slice(1, -1);
