@@ -1,1 +1,1 @@
-{"name":"vercel-smiles","version":"1.0.0","private":true,"type":"module","devDependencies":{"@types/node":"^22.0.0","typescript":"^5.9.2"},"engines":{"node":">=18"}}
+{"name":"vercel-smiles","version":"1.0.0","private":true,"type":"module","devDependencies":{"@types/node":"^22.0.0","typescript":"^5.9.2"},"engines":{"node":">=18"},"dependencies":{"@vercel/node":"^5.3.24"}}
