@@ -1,61 +1,44 @@
 // api/smiles.ts
-// Next.js (Node) serverless en Vercel
+    import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-
-// === Post-procesos portados de tu script ===
-const SPECIAL_TOKENS = new Set([
-"[CLS]", "[SEP]", "[PAD]", "[UNK]", "[BOS]", "[EOS]", "[MASK]"
-]);
-
+const SPECIAL_TOKENS = new Set(["[CLS]","[SEP]","[PAD]","[UNK]","[BOS]","[EOS]","[MASK]"]);
 
 function decodificarTokens(tokens: string[]): string {
-const mol: string[] = [];
-for (const tok of tokens) {
+    const mol: string[] = [];
+    for (const tok of tokens) {
     if (SPECIAL_TOKENS.has(tok)) continue;
-    
-
-    if (tok.startsWith("[") && tok.endsWith("]")) {
+if (tok.startsWith("[") && tok.endsWith("]")) {
     const contenido = tok.slice(1, -1);
-    if (/^[A-Za-z0-9@=#+\\\/-]+$/.test(contenido)) {
-        mol.push(contenido);
-    } else {
-        mol.push(tok);
-    }
+    if (/^[A-Za-z0-9@=#+\\\/-]+$/.test(contenido)) mol.push(contenido);
+    else mol.push(tok);
     } else {
     mol.push(tok);
     }
-}
-return mol.join("");
+    }
+    return mol.join("");
 }
 
 function postprocesarSmiles(tokensString: string): string {
-const pattern = /\[.*?\]/g;
-const tokensFuera = tokensString.split(pattern);
-const matches = tokensString.match(pattern) || [];
+    const pattern = /\[.*?\]/g;
+    const tokensFuera = tokensString.split(pattern);
+    const matches = tokensString.match(pattern) || [];
+    const result: string[] = [];
+    const branchStack: string[] = [];
+    const ringOpen: Record<string, boolean> = {};
 
-const result: string[] = [];
-const branchStack: string[] = [];
-const ringOpen: Record<string, boolean> = {};
-
-for (let i = 0; i < tokensFuera.length; i++) {
+    for (let i = 0; i < tokensFuera.length; i++) {
     result.push(tokensFuera[i]);
-
-    if (i < matches.length) {
+if (i < matches.length) {
     const tok = matches[i];
-
-    if (tok.startsWith("[Branch")) {
+if (tok.startsWith("[Branch")) {
         result.push("(");
         branchStack.push(")");
     } else if (tok.startsWith("[Ring")) {
         const num = tok.match(/\d+/);
         if (num) {
         const n = num[0];
-        if (!ringOpen[n]) {
-            ringOpen[n] = true; // apertura
-        } else {
-            delete ringOpen[n]; // cierre
-        }
+        if (!ringOpen[n]) ringOpen[n] = true;
+        else delete ringOpen[n];
         result.push(n);
         }
     } else {
@@ -63,21 +46,25 @@ for (let i = 0; i < tokensFuera.length; i++) {
     }
     }
 }
-
-while (branchStack.length) {
-    result.push(branchStack.pop() as string);
-}
-
+while (branchStack.length) result.push(branchStack.pop() as string);
 return result.join("");
 }
 
-// === Handler principal ===
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Use POST' });
-}
+  // 🔹 CORS — PONER AL INICIO DEL HANDLER
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    if (req.method === "OPTIONS") {
+    return res.status(200).end();
+    }
+  // 🔹 Fin CORS
 
-try {
+    if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Use POST' });
+    }
+
+    try {
     const { input, max_length = 60, top_k = 50, top_p = 0.95, temperature = 1.0 } = req.body || {};
     if (typeof input !== 'string' || !input.trim()) {
     return res.status(400).json({ error: 'Falta "input" (string SMILES de entrada).' });
@@ -88,9 +75,7 @@ try {
     return res.status(500).json({ error: 'Falta HF_TOKEN en variables de entorno' });
     }
 
-    // Llamada a Hugging Face Inference API (text-generation)
-    // Modelo: ncfrey/ChemGPT-4.7M
-    const resp = await fetch('https://api-inference.huggingface.co/models/ncfrey/ChemGPT-4.7M', {
+const resp = await fetch('https://api-inference.huggingface.co/models/ncfrey/ChemGPT-4.7M', {
     method: 'POST',
     headers: {
         'Authorization': `Bearer ${HF_TOKEN}`,
@@ -99,12 +84,11 @@ try {
     body: JSON.stringify({
         inputs: input,
         parameters: {
-          max_new_tokens: Math.max(1, Math.min(256, max_length)), // tope prudente
+        max_new_tokens: Math.max(1, Math.min(256, max_length)),
         do_sample: true,
         top_k,
         top_p,
-        temperature,
-          // La API devuelve texto plano; si algún día migrás a endpoint custom que devuelva tokens, abajo ya tenemos decode
+        temperature
         }
     })
     });
@@ -115,31 +99,25 @@ try {
     }
 
     const data = await resp.json();
-
-    // La Inference API (text-generation) suele devolver [{ generated_text: "..." }]
-    // O bien strings. Tomamos el primer caso usable.
-    let generatedRaw = '';
+let generatedRaw = '';
     if (Array.isArray(data) && data.length && typeof data[0]?.generated_text === 'string') {
     generatedRaw = data[0].generated_text;
     } else if (typeof data === 'string') {
     generatedRaw = data;
     } else {
-      // fallback
-    generatedRaw = JSON.stringify(data);
+generatedRaw = JSON.stringify(data);
     }
 
-    // Si en algún momento devolvés tokens en vez de string,
-    // podrías mapear a decodificarTokens([...]) y luego postprocesar.
-    // Con generatedRaw como string aplicamos solo post-proceso "ligero".
-    const smilesPost = postprocesarSmiles(generatedRaw);
+const smilesPost = postprocesarSmiles(generatedRaw);
 
     return res.status(200).json({
     input,
-      output: smilesPost,          // <- tu front lee este string
-      raw: generatedRaw            // opcional: útil para debug
+    output: smilesPost,
+    raw: generatedRaw
     });
 
 } catch (err: any) {
+    console.error("SMILES_ERROR", err);
     return res.status(500).json({ error: 'Error interno', details: err?.message || String(err) });
 }
 }
