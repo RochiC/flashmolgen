@@ -1,36 +1,35 @@
-// api/smiles.ts
-    import type { VercelRequest, VercelResponse } from '@vercel/node';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const SPECIAL_TOKENS = new Set(["[CLS]","[SEP]","[PAD]","[UNK]","[BOS]","[EOS]","[MASK]"]);
 
 function decodificarTokens(tokens: string[]): string {
-    const mol: string[] = [];
-    for (const tok of tokens) {
+const mol: string[] = [];
+for (const tok of tokens) {
     if (SPECIAL_TOKENS.has(tok)) continue;
-if (tok.startsWith("[") && tok.endsWith("]")) {
+    if (tok.startsWith("[") && tok.endsWith("]")) {
     const contenido = tok.slice(1, -1);
     if (/^[A-Za-z0-9@=#+\\\/-]+$/.test(contenido)) mol.push(contenido);
     else mol.push(tok);
     } else {
     mol.push(tok);
     }
-    }
-    return mol.join("");
+}
+return mol.join("");
 }
 
 function postprocesarSmiles(tokensString: string): string {
-    const pattern = /\[.*?\]/g;
-    const tokensFuera = tokensString.split(pattern);
-    const matches = tokensString.match(pattern) || [];
-    const result: string[] = [];
-    const branchStack: string[] = [];
-    const ringOpen: Record<string, boolean> = {};
+const pattern = /\[.*?\]/g;
+const tokensFuera = tokensString.split(pattern);
+const matches = tokensString.match(pattern) || [];
+const result: string[] = [];
+const branchStack: string[] = [];
+const ringOpen: Record<string, boolean> = {};
 
-    for (let i = 0; i < tokensFuera.length; i++) {
+for (let i = 0; i < tokensFuera.length; i++) {
     result.push(tokensFuera[i]);
-if (i < matches.length) {
+    if (i < matches.length) {
     const tok = matches[i];
-if (tok.startsWith("[Branch")) {
+    if (tok.startsWith("[Branch")) {
         result.push("(");
         branchStack.push(")");
     } else if (tok.startsWith("[Ring")) {
@@ -51,37 +50,35 @@ return result.join("");
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // 🔹 CORS — PONER AL INICIO DEL HANDLER
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-    if (req.method === "OPTIONS") {
-    return res.status(200).end();
-    }
-  // 🔹 Fin CORS
+  // CORS
+res.setHeader("Access-Control-Allow-Origin", "*");
+res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+if (req.method === "OPTIONS") return res.status(200).end();
 
-    if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Use POST' });
-    }
+if (req.method !== "POST") {
+    return res.status(405).json({ error: "Use POST" });
+}
 
     try {
     const { input, max_length = 60, top_k = 50, top_p = 0.95, temperature = 1.0 } = req.body || {};
-    if (typeof input !== 'string' || !input.trim()) {
+    if (typeof input !== "string" || !input.trim()) {
     return res.status(400).json({ error: 'Falta "input" (string SMILES de entrada).' });
     }
 
     const HF_TOKEN = process.env.HF_TOKEN;
     if (!HF_TOKEN) {
-    return res.status(500).json({ error: 'Falta HF_TOKEN en variables de entorno' });
+    console.error("SMILES_ERROR: falta HF_TOKEN");
+    return res.status(500).json({ error: "Falta HF_TOKEN en variables de entorno" });
     }
 
-const resp = await fetch('https://api-inference.huggingface.co/models/ncfrey/ChemGPT-4.7M', {
-    method: 'POST',
+    const resp = await fetch("https://api-inference.huggingface.co/models/ncfrey/ChemGPT-4.7M", {
+    method: "POST",
     headers: {
-        'Authorization': `Bearer ${HF_TOKEN}`,
-        'Content-Type': 'application/json'
+        Authorization: `Bearer ${HF_TOKEN}`,
+        "Content-Type": "application/json"
     },
-    body: JSON.stringify({
+        body: JSON.stringify({
         inputs: input,
         parameters: {
         max_new_tokens: Math.max(1, Math.min(256, max_length)),
@@ -94,30 +91,26 @@ const resp = await fetch('https://api-inference.huggingface.co/models/ncfrey/Che
     });
 
     if (!resp.ok) {
-    const txt = await resp.text().catch(() => '');
-    return res.status(502).json({ error: 'Fallo llamando a HuggingFace', details: txt });
+    const txt = await resp.text().catch(() => "");
+    console.error("SMILES_HF_ERROR", resp.status, txt);
+    return res.status(502).json({ error: "Fallo llamando a HuggingFace", details: txt });
     }
 
     const data = await resp.json();
-let generatedRaw = '';
-    if (Array.isArray(data) && data.length && typeof data[0]?.generated_text === 'string') {
+    let generatedRaw = "";
+    if (Array.isArray(data) && data.length && typeof data[0]?.generated_text === "string") {
     generatedRaw = data[0].generated_text;
-    } else if (typeof data === 'string') {
+    } else if (typeof data === "string") {
     generatedRaw = data;
     } else {
-generatedRaw = JSON.stringify(data);
+    generatedRaw = JSON.stringify(data);
     }
 
-const smilesPost = postprocesarSmiles(generatedRaw);
+    const smilesPost = postprocesarSmiles(generatedRaw);
 
-    return res.status(200).json({
-    input,
-    output: smilesPost,
-    raw: generatedRaw
-    });
-
+    return res.status(200).json({ input, output: smilesPost, raw: generatedRaw });
 } catch (err: any) {
     console.error("SMILES_ERROR", err);
-    return res.status(500).json({ error: 'Error interno', details: err?.message || String(err) });
+    return res.status(500).json({ error: "Error interno", details: err?.message || String(err) });
 }
 }
